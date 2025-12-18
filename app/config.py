@@ -1,0 +1,26 @@
+"""
+Configuration and environment variable handling.
+"""
+
+from functools import lru_cache
+from pydantic_settings import BaseSettings
+from pydantic import Field
+
+
+class Settings(BaseSettings):
+
+    # Add env variables here in this format.
+    APP_ENV : str = Field(default="development", env="APP_ENV")
+    GA4_PROPERTY_ID: str | None = Field(default=None, env="GA4_PROPERTY_ID")
+    LITELLM_PROXY_URL: str | None = Field(default=None, env="LITELLM_PROXY_URL")
+    SERVICE_ACCOUNT_MAIL : str | None = Field(default=None,env = "SERVICE_ACCOUNT_MAIL")
+
+
+    class Config:
+        env_file = ".env"
+        extra = "ignore"
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
