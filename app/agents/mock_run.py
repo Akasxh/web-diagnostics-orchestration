@@ -142,6 +142,8 @@ def mock_seo_execute(df, task, prev_data=None):
 @patch('seo_agent._load_seo_data', mock_seo_load)
 @patch('seo_agent.execute_seo_task', mock_seo_execute)
 @patch('orchestrator_agent._llm_call', mock_llm_call)
+@patch('orchestrator_agent._load_seo_data', mock_seo_load)  # Patch where it's used
+@patch('orchestrator_agent.execute_seo_task', mock_seo_execute)  # Patch where it's used
 @patch('ga4_agent.GA4Wrapper.execute', mock_ga4_execute)
 def test_mock_hybrid_run():
     # Plan
