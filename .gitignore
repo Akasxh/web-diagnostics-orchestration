@@ -1,0 +1,46 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment & local config
+# .env
+# .env.*
+# *.local
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python packaging / build
+dist/
+build/
+*.egg-info/
+
+# uv lock backup (primary uv.lock is tracked)
+uv.lock.bak
+
+# Logs
+logs/
+*.log
+
+# Coverage / test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local credentials (do not commit secrets)
+# credentials.json
+
+
