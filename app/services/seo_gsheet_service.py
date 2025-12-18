@@ -70,6 +70,7 @@ def fetch_all_sheet_data(sheet_url: Optional[str] = None, force_refresh: bool = 
         print("Data cached successfully for 5 minutes.")
         
         # FIX: Return the actual data!
+        return {"Success" : "200"}
         return all_data
 
     except Exception as e:

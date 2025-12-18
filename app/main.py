@@ -75,7 +75,7 @@ async def list_sheet_names():
 async def getAnalytics(request: AnalyticsRequest):
     # return run_ga4_queries(request.propertyId,"Fetch daily page views, total users, and sessions for the /pricing page over the last 14 days.', 'inputs': {'metrics': 'pageViews, totalUsers, sessions', 'dimensions': 'date', 'date_range': 'last 14 days', 'filters': 'pagePath=/pricing', 'order_by': 'date asc', 'property_id': '123456789'}")
     # return taxonomy
-    return generate_schema_info()
+    return generate_schema_info
 
 
 
