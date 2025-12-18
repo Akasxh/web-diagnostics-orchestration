@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 import os
 load_dotenv()
 from app.config import get_settings
-from app.services.ga4_service import run_ga4_queries
+# from app.services.ga4_service import run_ga4_queries
 from app.services.seo_gsheet_service import get_sheet_names
 from .models import AnalyticsRequest
 from contextlib import asynccontextmanager
@@ -73,7 +73,7 @@ async def list_sheet_names():
 
 @app.post("/query")
 async def getAnalytics(request: AnalyticsRequest):
-    run_ga4_queries(request.propertyId)
+    # run_ga4_queries(request.propertyId)
     return taxonomy
 
 
