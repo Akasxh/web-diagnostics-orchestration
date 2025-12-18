@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     SERVICE_ACCOUNT_MAIL : str | None = Field(default=None,env = "SERVICE_ACCOUNT_MAIL")
     SHEET_ID : str | None = Field(default=None,env = "SHEET_ID")
     GOOGLE_APPLICATION_CREDENTIALS: str = Field(default="credentials.json", alias="GOOGLE_APPLICATION_CREDENTIALS")
+    AGENT_TAXONOMY_PATH : str = Field(default="agent_taxonomy.json", env="AGENT_TAXONOMY_PATH")
 
 
     class Config:
