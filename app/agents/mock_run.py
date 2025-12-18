@@ -6,20 +6,19 @@
 
 import sys
 import os
+import json
+import pandas as pd
+from unittest.mock import patch
+
 # Add directory containing 'app' package to path so absolute imports work when running directly
 # From app/agents/mock_run.py, go up to app/, then up to web-diagnostics-orchestration/
 app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # app/
 project_root = os.path.dirname(app_dir)  # web-diagnostics-orchestration/
 sys.path.insert(0, project_root)
 
-import json
-from unittest.mock import patch, MagicMock
-from langgraph.graph import StateGraph
-from agent import build_orchestration_graph, OrchestrationState
+# Import your agent modules (Ensure these paths match your project structure)
+from agent import build_orchestration_graph
 from planner import plan_query
-from ga4_agent import execute_ga4_task, get_ga4_client
-from seo_agent import execute_seo_task, _load_seo_data
-from orchestrator_agent import execute_plan, _llm_call as orch_llm_call
 
 # Mock Data
 MOCK_SEO_DF = {
@@ -34,11 +33,20 @@ MOCK_GA4_ROWS = [
     {'pagePath': '/old', 'sessions': '500'}
 ]
 
-# Patches
+# --- Mock Functions ---
+
 def mock_llm_call(prompt, *args, **kwargs):
-    if 'Classify' in prompt:
+    """
+    Mocks the LLM response based on keywords found in the prompt.
+    """
+    prompt_lower = prompt.lower()
+
+    # 1. Classification Step
+    if 'classify' in prompt_lower:
         return 'hybrid-ga4-driven'
-    if 'Decompose' in prompt:
+
+    # 2. Decomposition (Planning) Step
+    if 'decompose' in prompt_lower:
         return json.dumps([
             {
                 "id": "q0",
@@ -72,87 +80,95 @@ def mock_llm_call(prompt, *args, **kwargs):
                 }
             }
         ])
-    if 'fusion' in prompt.lower():
+
+    # 3. Final Answer / Summarization Step
+    # FIX: Updated to check for 'summarize' or 'join', which appear in Task q2 inputs
+    if 'summarize' in prompt_lower or 'join' in prompt_lower:
         return "Top pages: /home (1500 views, 'Home Page'), /pricing (1200 views, 'Pricing Page'), /old (500 views, 'Old Page - Long Title...')."
+    
+    # Fallback for debugging
+    print(f"DEBUG: Unmatched Prompt: {prompt[:50]}...") 
     return '{"type": "invalid"}'
 
 def mock_ga4_execute(self, payload):
-    """Mock for GA4Wrapper.execute - instance method so needs self parameter."""
-    # Extract pagePaths for template resolution
+    """Mock for GA4Wrapper.execute."""
     page_paths = [row['pagePath'] for row in MOCK_GA4_ROWS]
     return {
         "rows": MOCK_GA4_ROWS, 
         "row_count": 3, 
         "headers": ["pagePath", "sessions"],
-        "pagePaths": page_paths  # Add this for template {{q0.output.pagePaths}}
+        "pagePaths": page_paths 
     }
 
 def mock_seo_load():
-    import pandas as pd
+    """Mock loading SEO data from GSpread/CSV."""
     return pd.DataFrame(MOCK_SEO_DF)
 
 def mock_seo_execute(df, task, prev_data=None):
-    """Mock for execute_seo_task - handles title lookup."""
-    import pandas as pd
+    """Mock for execute_seo_task."""
     if df.empty:
         df = pd.DataFrame(MOCK_SEO_DF)
     
+    # Logic to mock the 'title' lookup
     if 'title' in task.get('desc', '').lower():
-        # Extract URLs from prev_data (which is resolved_inputs from orchestrator)
         urls = []
+        # Resolve URLs from previous input
         if prev_data:
             urls_input = prev_data.get('urls', [])
             if isinstance(urls_input, list):
                 urls = urls_input
             elif isinstance(urls_input, str):
-                # Try to parse as JSON if it's a string
                 try:
                     parsed = json.loads(urls_input)
                     if isinstance(parsed, list):
                         urls = parsed
                 except:
-                    # If not JSON, treat as single URL or use mock data
                     urls = [urls_input] if urls_input else ['/home', '/pricing', '/old']
         else:
-            # Use pagePaths from mock GA4 data
             urls = [row['pagePath'] for row in MOCK_GA4_ROWS]
         
-        # Match URLs to addresses in the DataFrame
-        # Create a mapping of simplified paths to full addresses
+        # Simple matching logic
         titles = {}
         for url in urls:
-            # Normalize URL for matching
             url_clean = url.strip('/')
+            found = False
             for _, row in df.iterrows():
                 address = str(row.get('Address', ''))
                 address_clean = address.replace('https://', '').replace('http://', '').strip('/')
-                # Match if URL is in address or vice versa
+                
                 if url_clean in address_clean or address_clean.endswith(url_clean):
                     titles[url] = row.get('Title 1', '')
+                    found = True
                     break
-            # If no match found, use a default
-            if url not in titles:
+            if not found:
                 titles[url] = f"Title for {url}"
         
         return {"task_id": task['id'], "data": {"titles": titles, "found": len(titles), "urls": urls}}
+    
     return {"task_id": task['id'], "data": {"error": "Mock SEO error"}}
 
-@patch('planner._llm_call', mock_llm_call)
-@patch('seo_agent._llm_call', mock_llm_call)
-@patch('seo_agent._load_seo_data', mock_seo_load)
-@patch('seo_agent.execute_seo_task', mock_seo_execute)
-@patch('orchestrator_agent._llm_call', mock_llm_call)
-@patch('orchestrator_agent._load_seo_data', mock_seo_load)  # Patch where it's used
-@patch('orchestrator_agent.execute_seo_task', mock_seo_execute)  # Patch where it's used
-@patch('ga4_agent.GA4Wrapper.execute', mock_ga4_execute)
-def test_mock_hybrid_run():
-    # Plan
+# --- Test Execution with Patches ---
+
+@patch('planner._llm_call', side_effect=mock_llm_call)
+@patch('seo_agent._llm_call', side_effect=mock_llm_call)
+@patch('seo_agent._load_seo_data', side_effect=mock_seo_load)
+@patch('seo_agent.execute_seo_task', side_effect=mock_seo_execute)
+@patch('orchestrator_agent._llm_call', side_effect=mock_llm_call)
+@patch('orchestrator_agent._load_seo_data', side_effect=mock_seo_load)
+@patch('orchestrator_agent.execute_seo_task', side_effect=mock_seo_execute)
+@patch('ga4_agent.GA4Wrapper.execute', side_effect=mock_ga4_execute)
+def test_mock_hybrid_run(mock_ga4, mock_orch_seo_exec, mock_orch_seo_load, mock_orch_llm, 
+                         mock_seo_exec, mock_seo_load, mock_seo_llm, mock_planner_llm):
+    
+    # Define the inputs
     query = "Top 10 pages by views last 14 days with their title tags?"
     property_id = "123456789"
+
+    print("--- 1. Generating Plan ---")
     plan = plan_query(query, property_id)
     print("Mock Plan:", json.dumps(plan, indent=2))
 
-    # Execute via graph
+    print("\n--- 2. Executing Graph ---")
     graph = build_orchestration_graph()
     initial = {
         "query": query,
@@ -161,7 +177,11 @@ def test_mock_hybrid_run():
         "task_results": [],
         "response": ""
     }
+    
+    # Run the graph
     result = graph.invoke(initial)
+    
+    print("\n--- 3. Final Outputs ---")
     print("Mock Results:", json.dumps(result['task_results'], indent=2))
     print("Mock Response:", result['response'])
 
