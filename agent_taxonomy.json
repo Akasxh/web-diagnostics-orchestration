@@ -1,0 +1,40 @@
+{
+    "agents": [
+      {
+        "agent_id": "ga4",
+        "description": "Handles analytics queries using the Google Analytics 4 Data API.",
+        "taxonomies": [
+          {
+            "type": "single-ga4-retrieval",
+            "description": "Direct GA4 data fetch (metrics, dimensions, filters)."
+          },
+          {
+            "type": "single-ga4-analysis",
+            "description": "GA4 fetch + aggregations/trends/insights."
+          },
+          {
+            "type": "hybrid-ga4-driven",
+            "description": "Starts with GA4, enriches with SEO."
+          }
+        ]
+      },
+      {
+        "agent_id": "seo",
+        "description": "Handles SEO audit queries using Screaming Frog spreadsheet exports.",
+        "taxonomies": [
+          {
+            "type": "single-seo-retrieval",
+            "description": "Direct SEO data fetch (filters, lists from spreadsheet)."
+          },
+          {
+            "type": "single-seo-analysis",
+            "description": "SEO fetch + groupings/percentages/assessments."
+          },
+          {
+            "type": "hybrid-seo-driven",
+            "description": "Starts with SEO, enriches with GA4."
+          }
+        ]
+      }
+    ]
+  }

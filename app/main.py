@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 import json
 import uvicorn
+from app.orchestrator import taxonomy
 
 # from .models import DiagnosticsRequest, DiagnosticsResponse
 # from .orchestrator import Orchestrator
@@ -73,7 +74,8 @@ async def list_sheet_names():
 @app.post("/query")
 async def getAnalytics(request: AnalyticsRequest):
     run_ga4_queries(request.propertyId)
-    return request
+    return taxonomy
+
 
 
 if __name__ == "__main__":
