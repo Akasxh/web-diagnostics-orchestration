@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     GA4_PROPERTY_ID: str | None = Field(default=None, env="GA4_PROPERTY_ID")
     LITELLM_PROXY_URL: str | None = Field(default=None, env="LITELLM_PROXY_URL")
     SERVICE_ACCOUNT_MAIL : str | None = Field(default=None,env = "SERVICE_ACCOUNT_MAIL")
+    SHEET_ID : str | None = Field(default=None,env = "SHEET_ID")
+    GOOGLE_APPLICATION_CREDENTIALS: str = Field(default="credentials.json", alias="GOOGLE_APPLICATION_CREDENTIALS")
 
 
     class Config:
@@ -21,6 +23,7 @@ class Settings(BaseSettings):
         extra = "ignore"
 
 
-@lru_cache(maxsize=1)
+
+@lru_cache
 def get_settings() -> Settings:
     return Settings()
