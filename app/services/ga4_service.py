@@ -4,22 +4,15 @@ Google Analytics Data API (GA4) wrapper.
 """
 
 from google.analytics.data_v1beta import BetaAnalyticsDataClient
-from google.analytics.data_v1beta.types import RunReportRequest
-from google.analytics.data_v1beta.types import RunRealtimeReportRequest
-
-from google.analytics.data_v1beta.types import (
-    RunReportRequest, RunRealtimeReportRequest,
-    FilterExpression, Filter, OrderBy, DateRange, Metric, Dimension
-)
-
-import os
-import json
-import re
-from openai import OpenAI
 from google.analytics.data_v1beta.types import (
     RunReportRequest, DateRange, Dimension, Metric,
     FilterExpression, Filter, FilterExpressionList, OrderBy
 )
+import os
+import json
+import re
+from openai import OpenAI
+from app.config import get_settings
 
 def get_ga4_client():
     """
@@ -32,12 +25,12 @@ def get_ga4_client():
 # ==========================================
 # 1. SETUP
 # ==========================================
-os.environ['LITELLM_API_KEY'] = 'sk-Mh6Ytmir4rdFDFmxzk46KA'
-LITELLM_BASE_URL = 'http://3.110.18.218'
+
+settings = get_settings()
 
 client = OpenAI(
-    api_key=os.environ['LITELLM_API_KEY'],
-    base_url=LITELLM_BASE_URL
+    api_key= settings.LITELLM_KEY,
+    base_url=settings.LITELLM_PROXY_URL
 )
 
 # ==========================================
@@ -56,6 +49,14 @@ def get_ga4_payload(raw_input_string):
     - If the input is a dictionary string (e.g. {'inputs': ...}), prioritize the values inside 'inputs'.
     - If the user asks for comparisons (e.g., "preceding period", "previous 30 days"), you must generate TWO items in the "date_ranges" list.
 
+    You must convert common names to specific GA4 API field names:
+    - "page views" or "views" -> "screenPageViews"
+    - "users" or "visitors"   -> "activeUsers"
+    - "sessions"              -> "sessions"
+    - "bounce rate"           -> "bounceRate"
+    - "page" or "url"         -> "pagePath"
+    - "title"                 -> "pageTitle"
+
     DATE LOGIC (CRITICAL):
     - "Last 30 days" -> {"start": "30daysAgo", "end": "today"}
     - "Preceding 30 days" (Comparison) -> {"start": "60daysAgo", "end": "31daysAgo"}
@@ -64,7 +65,6 @@ def get_ga4_payload(raw_input_string):
 
     REQUIRED JSON OUTPUT FORMAT:
     {
-        "property_id": "extracted_id_or_null",
         "date_ranges": [
             {"start": "start_date_string", "end": "end_date_string"},
             {"start": "start_date_string_2", "end": "end_date_string_2"} // Optional for comparison
@@ -77,6 +77,8 @@ def get_ga4_payload(raw_input_string):
         ],
         "order_by": {"field": "name", "desc": boolean}
     }
+
+    NOTE: Do NOT include "property_id" in your output. It will be provided separately and will override any value you might extract.
 
     Return ONLY valid JSON.
     """
@@ -109,8 +111,7 @@ class GA4UniversalWrapper:
         """
         property_id = data.get("property_id")
         if not property_id:
-            # Fallback if LLM didn't find it in the text, use a default or raise error
-            property_id = "0"
+            raise ValueError("property_id is required in the data payload")
 
         # 1. Handle Multiple Date Ranges (Loop)
         date_ranges = []
@@ -169,40 +170,42 @@ class GA4UniversalWrapper:
         return None
 
 
-# ==========================================
-# 4. EXECUTION
-# ==========================================
-
-# Your problematic query (passed as a raw string or dict)
-bad_user_query = "{'id': 1, 'agent': 'ga4', 'desc': 'Fetch daily page views for the homepage for the last 30 days and the preceding 30-day period.', 'inputs': {'metrics': 'pageViews', 'dimensions': 'date', 'filters': 'pagePath=/', 'date_ranges': ['last 30 days', 'previous 30 days'], 'property_id': '123456789'}"
-
-print("... processing query ...")
-
-# Step 1: LLM structures the data and solves date math
-llm_payload = get_ga4_payload(bad_user_query)
-print("\n[LLM Interpreted Payload]:")
-print(json.dumps(llm_payload, indent=2))
-
-# Step 2: Wrapper builds the object
-builder = GA4UniversalWrapper()
-request_object = builder.build(llm_payload)
-
-print("\n[Final GA4 Request Object]:")
-print(request_object)
-
-# Validation of the critical fix:
-print(f"\n[Validation] Number of Date Ranges: {len(request_object.date_ranges)}")
-print(f"Range 1: {request_object.date_ranges[0].start_date} to {request_object.date_ranges[0].end_date}")
-if len(request_object.date_ranges) > 1:
-    print(f"Range 2: {request_object.date_ranges[1].start_date} to {request_object.date_ranges[1].end_date}")
-
-def run_ga4_queries(property_id, request_object):
+def run_ga4_queries(property_id, user_query):
     """
     Runs the GA4 queries.
+    
+    Args:
+        property_id: The GA4 property ID to query (ALWAYS used, overrides any value in user_query)
+        user_query: The query string/dict that will be parsed by LLM
     """
+    if not property_id:
+        raise ValueError("property_id is required and cannot be None or empty")
+    
     client = get_ga4_client()
+    llm_payload = get_ga4_payload(user_query)
+    
+    if not llm_payload:
+        llm_payload = {}
+    
+    llm_payload["property_id"] = property_id
+    
+    builder = GA4UniversalWrapper()
+    request_object = builder.build(llm_payload)
+    print(request_object)
     response = client.run_report(request=request_object)
-    return response
+    clean_data = []
+    
+    for row in response.rows:
+        item = {
+            # Extract dimensions (e.g., date, page path)
+            "dimensions": [d.value for d in row.dimension_values],
+            # Extract metrics (e.g., views, active users)
+            "metrics": [m.value for m in row.metric_values]
+        }
+        clean_data.append(item)
 
-response = run_ga4_queries(property_id, request_object)
-print(json.dumps(response.to_dict(), indent=2))
+    # 4. Return the standard Python list
+    return {
+        "status": "success",
+        "data": clean_data
+    }

@@ -2,8 +2,8 @@ from dotenv import load_dotenv
 import os
 load_dotenv()
 from app.config import get_settings
-# from app.services.ga4_service import run_ga4_queries
-from app.services.seo_gsheet_service import get_sheet_names
+from app.services.ga4_service import run_ga4_queries
+from app.services.seo_gsheet_service import get_sheet_names,fetch_all_sheet_data,generate_schema_info
 from .models import AnalyticsRequest
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -73,8 +73,9 @@ async def list_sheet_names():
 
 @app.post("/query")
 async def getAnalytics(request: AnalyticsRequest):
-    # run_ga4_queries(request.propertyId)
-    return taxonomy
+    # return run_ga4_queries(request.propertyId,"Fetch daily page views, total users, and sessions for the /pricing page over the last 14 days.', 'inputs': {'metrics': 'pageViews, totalUsers, sessions', 'dimensions': 'date', 'date_range': 'last 14 days', 'filters': 'pagePath=/pricing', 'order_by': 'date asc', 'property_id': '123456789'}")
+    # return taxonomy
+    return generate_schema_info()
 
 
 

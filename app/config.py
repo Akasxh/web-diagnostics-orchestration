@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     SHEET_ID : str | None = Field(default=None,env = "SHEET_ID")
     GOOGLE_APPLICATION_CREDENTIALS: str = Field(default="credentials.json", alias="GOOGLE_APPLICATION_CREDENTIALS")
     AGENT_TAXONOMY_PATH : str = Field(default="agent_taxonomy.json", env="AGENT_TAXONOMY_PATH")
+    LITELLM_KEY : str = Field(default=None,env = "LITELLM_KEY")
 
 
     class Config:
