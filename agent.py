@@ -16,15 +16,20 @@ from app.config import get_settings
 
 settings = get_settings()
 
-
 # State definition for LangGraph
 class OrchestrationState(TypedDict):
+    property_id: str
     query: str
     property_id: str  # From input
     plans: Dict[str, Any]  # Full plan from planner
     task_results: List[Dict[str, Any]]
     response: str
 
+def if_seo_only(state: OrchestrationState) -> bool:
+    """
+    Condition to check if the query is SEO-only based on the plan type.
+    """
+    return 0 if state[property_id] else 1
 
 # Nodes
 def query_agent(state: OrchestrationState) -> OrchestrationState:
@@ -33,7 +38,7 @@ def query_agent(state: OrchestrationState) -> OrchestrationState:
     Uses generate_plan from app.orchestrator.
     """
     query = state['query']
-    property_id = state.get('property_id', settings.GA4_PROPERTY_ID or '123456789')
+    property_id = state.get('property_id', settings.GA4_PROPERTY_ID)
     
     if not query.strip():
         return {
