@@ -67,10 +67,13 @@ import copy
 
 def execute_task(task , agent):
     # seo or ga4
-    if task['type'] == 'seo':
+    print(task)
+    print(agent)
+    response = None
+    if agent == 'seo':
         from app.services.seo_gsheet_service import execute_workbook_query
         response = execute_workbook_query(task['desc'])
-    elif task['type'] == 'ga4':
+    elif agent == 'ga4':
         from app.services.ga4_service import run_ga4_queries
         response = run_ga4_queries(task['inputs']['property_id'], task['desc'])
     return response
@@ -151,7 +154,8 @@ def task_executor(state: OrchestrationState) -> OrchestrationState:
             # Execute
             # Pass the modified payload (with injected data) to your executor
             print(f"Executing Task {tid}: {task['desc']}") # Logging
-            result = execute_task(execution_payload)
+            print(tasks)
+            result = execute_task(execution_payload,tasks[1])
             
             # Store result and mark complete
             task_results[tid] = result
