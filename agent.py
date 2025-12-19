@@ -63,24 +63,110 @@ def orchestrator_node(state: OrchestrationState) -> OrchestrationState:
     return state
 
 
+import copy
+
+def execute_task(task , agent):
+    # seo or ga4
+    if task['type'] == 'seo':
+        from app.services.seo_gsheet_service import execute_workbook_query
+        response = execute_workbook_query(task['desc'])
+    elif task['type'] == 'ga4':
+        from app.services.ga4_service import run_ga4_queries
+        response = run_ga4_queries(task['inputs']['property_id'], task['desc'])
+    return response
+
 def task_executor(state: OrchestrationState) -> OrchestrationState:
     """
     Node 3: Execute tasks based on the plan and generate final response.
-    Uses mock_execution_layer and answer_agent from app.orchestrator.
+    Implements a DAG solver to handle dependencies and pass data between tasks.
     """
-    plans = state['plans']
-    
-    # Skip execution for invalid plans
-    if plans.get('type') == 'invalid':
+    plans = state.get("plans")
+
+    # Guard: invalid or missing plan
+    if not plans or plans.get("type") == "invalid":
         return state
+
+    tasks = plans.get("tasks", [])
+    # Ensure dependencies keys are integers if your IDs are integers
+    # The JSON schema might return strings like "2", so we normalize.
+    raw_deps = plans.get("dependencies", {})
+    dependencies = {int(k): [int(v) for v in vals] for k, vals in raw_deps.items()}
+
+    # Map tasks by ID for easy lookup
+    task_map = {t["id"]: t for t in tasks}
     
-    # Execute tasks (currently using mock layer)
-    task_results = mock_execution_layer(plans)
-    
-    # Generate final answer
+    # Store results: { task_id: output }
+    task_results = {}
+    completed_ids = set()
+
+    # ---- Execution Loop (DAG Solver) ---- #
+    # This loop works for sequential, parallel (independent), and mixed flows.
+    while len(completed_ids) < len(tasks):
+        progress = False
+        
+        # Identify tasks that are ready to run
+        # Ready = Not yet completed AND all dependencies are completed
+        ready_tasks = []
+        for task in tasks:
+            tid = task["id"]
+            if tid in completed_ids:
+                continue
+            
+            # Check if all dependencies for this task are in completed_ids
+            task_deps = dependencies.get(tid, [])
+            if all(dep_id in completed_ids for dep_id in task_deps):
+                ready_tasks.append(task)
+
+        # Execution Phase
+        if not ready_tasks:
+            # If tasks remain but none are ready, we have a cyclic dependency or missing ID
+            remaining = [t["id"] for t in tasks if t["id"] not in completed_ids]
+            raise RuntimeError(f"Deadlock detected! Remaining tasks {remaining} have unresolved dependencies.")
+
+        for task in ready_tasks:
+            tid = task["id"]
+            
+            # --- CRITICAL FIX: Context Injection ---
+            # Create a copy of inputs to avoid mutating the original plan
+            # and inject outputs from dependency tasks.
+            current_inputs = copy.deepcopy(task.get("inputs", {}))
+            
+            task_deps = dependencies.get(tid, [])
+            if task_deps:
+                # Collect results from all parent tasks
+                parent_outputs = {
+                    f"task_{dep_id}_output": task_results[dep_id] 
+                    for dep_id in task_deps
+                }
+                # Merge parent outputs into current inputs
+                # The agent receiving this must know to look for these keys or 'context'
+                current_inputs["context"] = parent_outputs
+                
+                # OPTIONAL: If you want to merge directly into the root of inputs
+                # current_inputs.update(parent_outputs)
+
+            # Update task inputs temporarily for execution
+            execution_payload = {**task, "inputs": current_inputs}
+            
+            # Execute
+            # Pass the modified payload (with injected data) to your executor
+            print(f"Executing Task {tid}: {task['desc']}") # Logging
+            result = execute_task(execution_payload)
+            
+            # Store result and mark complete
+            task_results[tid] = result
+            completed_ids.add(tid)
+            progress = True
+
+    # ---- Final Answer ---- #
+    # Pass the full context to the answer agent to format the NL response
     response = answer_agent(task_results, plans)
-    
-    return {"task_results": task_results, "response": response}
+
+    return {
+        **state,
+        "task_results": task_results,
+        "response": response
+    }
 
 
 # Build Graph

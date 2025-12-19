@@ -167,9 +167,11 @@ def generate_plan(query: str, property_id: str = None, model: str = "gemini-2.5-
     tasks = decompose_query(query, query_type, model)
 
     dependencies = {task['id']: [task['id'] - 1] for task in tasks if task['id'] > 1}
+
     output_format = 'json' if 'json' in query.lower() else 'nl'
 
     aggregation_prompt = "Fuse results: Join on URLs, summarize trends/insights."
+
     if 'single' in query_type:
         aggregation_prompt = "Aggregate and explain in natural language."
 
@@ -201,6 +203,19 @@ def generate_plan(query: str, property_id: str = None, model: str = "gemini-2.5-
     
     print(f"Debug: Generated plan with {len(tasks)} tasks (includes final answer)")
     return plan
+
+"""{
+'type': 'single-seo-analysis', 
+'tasks': [
+    {'id': 1, 'agent': 'seo', 'desc': 'Fetch the distribution of HTTP status codes from the last site crawl.', 'inputs': {'analysis': 'status_codes'}}, 
+    {'id': 2, 'agent': 'seo', 'desc': 'Calculate the percentage of 200 (OK) and 301 (Moved Permanently) status codes from the total and present the result.', 'inputs': {'status_code_distribution': 'from task 1 output'}}, 
+    {'id': 3, 'agent': 'answer', 'desc': 'Format final aggregated results as natural language', 'inputs': {'results': 'from previous tasks', 'format': 'nl', 'prompt': 'Aggregate and explain in natural language.'}}], 
+'dependencies': {2: [1], 3: [2]}, 
+'output_format': 'nl', 
+'aggregation_prompt': 'Aggregate and explain in natural language.'
+}"""
+
+
 
 def answer_agent(task_results: list[dict], plan: dict, model: str = "gemini-2.5-pro") -> str:
     """
