@@ -9,20 +9,20 @@ import json
 import re
 from typing import List, Dict, Any
 
+settings = get_settings()
+
 # Global cache variables
 _SEO_WORKBOOK_CACHE = None  # type: dict | None
 _LAST_FETCH_TIME = 0
-CACHE_DURATION = 300  # Refresh every 5 minutes (optional)
+CACHE_DURATION = 120  # Refresh every 2 minutes (optional)
 
-os.environ['LITELLM_API_KEY'] = 'sk-Mh6Ytmir4rdFDFmxzk46KA'
-LITELLM_BASE_URL = 'http://3.110.18.218'
+os.environ['LITELLM_API_KEY'] = settings.LITELLM_KEY
+LITELLM_BASE_URL = settings.LITELLM_PROXY_URL
 
 client = OpenAI(
-    api_key=os.environ['LITELLM_API_KEY'],
+    api_key= settings.LITELLM_KEY,
     base_url=LITELLM_BASE_URL
 )
-
-settings = get_settings()
 
 
 def get_seo_workbook(force_refresh: bool = False) ->        dict:
@@ -173,14 +173,27 @@ def execute_workbook_query(query: str, force_refresh: bool = False) -> Any:
     """
 
     # 4. Call LLM
-    try:
-        response = client.chat.completions.create(
-            model="gemini-2.5-pro",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        llm_response = response.choices[0].message.content.strip()
-    except Exception as e:
-        return f"Error contacting LLM: {e}"
+    max_retries = 5
+    base_delay = 1
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model="gemini-2.5-pro",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            llm_response = response.choices[0].message.content.strip()
+            break
+        except Exception as e:
+            if hasattr(e, "status_code") and getattr(e, "status_code", None) == 429:
+                wait_time = base_delay * (2 ** attempt)
+                print(f"LLM API rate limited. Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                if attempt == max_retries - 1:
+                    return f"Error contacting LLM: {e}"
+                continue
+    else:
+        return "Failed to contact LLM after retries."
 
     # 5. Extract Code Block
     # Regex explains: Look for ```python (or just ```), capture content, end with ```

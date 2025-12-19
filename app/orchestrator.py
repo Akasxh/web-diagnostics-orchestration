@@ -51,11 +51,11 @@ load_agent_taxonomy(TAXONOMY_JSON_PATH)
 
 
 # --- Configuration & Setup ---
-os.environ['LITELLM_API_KEY'] = 'sk-Mh6Ytmir4rdFDFmxzk46KA'
-LITELLM_BASE_URL = 'http://3.110.18.218'
+os.environ['LITELLM_API_KEY'] = settings.LITELLM_KEY
+LITELLM_BASE_URL = settings.LITELLM_PROXY_URL
 
 client = OpenAI(
-    api_key=os.environ['LITELLM_API_KEY'],
+    api_key= settings.LITELLM_KEY,
     base_url=LITELLM_BASE_URL
 )
 
@@ -66,20 +66,12 @@ def classify_query(query: str, model: str = "gemini-2.5-pro") -> str:
     Classifies the query into one of the taxonomy types using LLM.
     """
     print(f"Using model: {model} for classification")
+    taxonomy_prompt = "\n".join([f"- {t}: {desc}" for t, desc in taxonomy.items()])
     prompt = f"""
-Classify this query based on the taxonomy:
-- single-ga4-retrieval: Direct GA4 data fetch (metrics, dimensions, filters).
-- single-ga4-analysis: GA4 fetch + aggregations/trends/insights.
-- single-seo-retrieval: Direct SEO data fetch (filters, lists from spreadsheet).
-- single-seo-analysis: SEO fetch + groupings/percentages/assessments.
-- hybrid-ga4-driven: Starts with GA4, enriches with SEO.
-- hybrid-seo-driven: Starts with SEO, enriches with GA4.
-- hybrid-insight: Cross-domain with added analysis/risks.
-- invalid: Doesn't match domains.
-
-Query: {query}
-
-Output only the type as a single string.
+        Classify this query based on the taxonomy:
+        {taxonomy_prompt}
+        Query: {query}
+        Output only the type as a single string.
 """
     max_retries = 5
     base_delay = 1
@@ -215,78 +207,6 @@ def generate_plan(query: str, property_id: str = None, model: str = "gemini-2.5-
 'aggregation_prompt': 'Aggregate and explain in natural language.'
 }"""
 
-
-
-# app/orchestrator.py (Only the answer_agent function needs changing)
-
-
-# def answer_agent(task_results, input_query, plan: dict, model: str = "gemini-2.5-pro") -> str:
-#     """
-#     Final Answer Agent: Aggregates task results, applies fusion/explanation, formats per plan.
-#     """
-#     print(f"Using model: {model} for answer aggregation")
-#     if not task_results:
-#         return "No results to aggregate."
-
-#     # --- FIX 1: Handle Input Format (List vs Dict) ---
-#     # If coming from LangGraph, task_results is likely {1: data, 2: data}
-#     # If coming from Mock, it might be [{'task_id': 1, 'data': ...}]
-    
-#     merged_results = {}
-    
-#     if isinstance(task_results, dict):
-#         merged_results = task_results
-#     elif isinstance(task_results, list):
-#         # Handle the list format if it still occurs
-#         try:
-#             merged_results = {r['task_id']: r['data'] for r in task_results}
-#         except TypeError:
-#             # Fallback if list contains just values
-#             merged_results = {i: val for i, val in enumerate(task_results)}
-#     else:
-#         merged_results = {0: str(task_results)}
-
-#     print(f"Debug: Merging {len(merged_results)} results")
-
-#     fusion_prompt = f"""
-# Aggregate these results: {json.dumps(merged_results, default=str)}
-# Use this prompt: {plan['aggregation_prompt']}
-# Output the fused data only—no intro text.
-# """
-#     # ... rest of the function remains the same ...
-#     max_retries = 3
-#     base_delay = 1
-#     fused_data = ""
-    
-#     for attempt in range(max_retries):
-#         try:
-#             response = client.chat.completions.create(
-#                 model=model,
-#                 messages=[{"role": "user", "content": fusion_prompt}]
-#             )
-#             fused_data = response.choices[0].message.content.strip()
-#             break
-#         except APIError as e:
-#             if e.status_code == 429:
-#                 wait_time = base_delay * (2 ** attempt)
-#                 print(f"Rate limited in answer agent. Retrying in {wait_time}s...")
-#                 time.sleep(wait_time)
-#             else:
-#                 raise e
-#     else:
-#         fused_data = str(merged_results)
-
-#     if plan['output_format'] == 'json':
-#         try:
-#             if not fused_data.startswith('{') and not fused_data.startswith('['):
-#                 fused_data = json.dumps({'aggregated_results': fused_data})
-#             final_response = json.dumps(json.loads(fused_data), indent=2)
-#         except (json.JSONDecodeError, ValueError):
-#             final_response = json.dumps({'error': 'Failed to format as JSON', 'raw': fused_data})
-#     else:
-#         final_response = f"Final Answer: {fused_data}"
-
-#     return final_response
 
 
 import re

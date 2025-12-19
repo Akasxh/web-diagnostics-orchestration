@@ -11,6 +11,9 @@ import json
 import uvicorn
 from app.orchestrator import taxonomy
 from openai import OpenAI
+import time
+from openai import APIError
+
 
 # from .models import DiagnosticsRequest, DiagnosticsResponse
 # from .orchestrator import Orchestrator
@@ -24,8 +27,6 @@ async def lifespan(app: FastAPI):
     if not os.path.exists(settings.GOOGLE_APPLICATION_CREDENTIALS):
         print(f"WARNING: {settings.GOOGLE_APPLICATION_CREDENTIALS} not found! GA4 calls will fail.")
     else:
-        # 2. Set the strict environment variable Google looks for.
-        # We do this inside Python so it doesn't matter how the shell was configured.
         os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = settings.GOOGLE_APPLICATION_CREDENTIALS
         print(f"Loaded Google Credentials from: {settings.GOOGLE_APPLICATION_CREDENTIALS}")
     
@@ -70,59 +71,27 @@ async def list_sheet_names():
 
 
 
+def json_requirement(query : str):
+    """
+    Checks if the word 'json' (case-insensitive) appears in the query string.
+    Returns True if found, otherwise False.
+    """
+    if not isinstance(query, str):
+        return False
+    return 'json' in query.lower()
+
 
 from agent import run_graph
 @app.post("/query")
-async def getAnalytics(request: AnalyticsRequest):
-    # query and propertyID
-    # return run_ga4_queries(request.propertyId,"Fetch daily page views, total users, and sessions for the /pricing page over the last 14 days.', 'inputs': {'metrics': 'pageViews, totalUsers, sessions', 'dimensions': 'date', 'date_range': 'last 14 days', 'filters': 'pagePath=/pricing', 'order_by': 'date asc', 'property_id': '123456789'}")
-    # return taxonomy
+def getAnalytics(request: AnalyticsRequest):
 
-    async def llm_detect_json_requirement(query: str) -> bool:
-        """
-        Calls LLM to check if the user is demanding JSON output. LLM must respond:
-        {
-        "isJson": "True" or "False"
-        }
-        """
-        client = OpenAI(
-            api_key= settings.LITELLM_KEY,
-            base_url=settings.LITELLM_PROXY_URL
-        )
-        prompt = f"""
-                Given the following user query, is the user explicitly asking for the answer/output/result to be in JSON format? 
-                Respond ONLY in JSON with this format:
-                {{
-                "isJson": "True" or "False"
-                }}
-                User Query:
-                \"\"\"{query}\"\"\"
-                """
-        
-        response = client.chat.completions.create(
-            model="gemini-2.5-pro",
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user"} # Convert dict to str if needed
-            ]
-        )
-
-        # Clean potential markdown wrapping
-        raw = response.choices[0].message.content.strip()
-        try:
-            result = json.loads(raw)
-            return result.get("isJson", "False") == "True"
-        except Exception:
-            return False
-        
-    shouldBeJson = llm_detect_json_requirement(request.query)
+    shouldBeJson = json_requirement(request.query)
+    print(shouldBeJson)
     return run_graph(request.query,request.propertyId,shouldBeJson)
 
 
 
-
 if __name__ == "__main__":
-
     uvicorn.run("app.main:app", host="0.0.0.0", port=8080, reload=True)
 
 
