@@ -10,6 +10,7 @@ from fastapi import FastAPI
 import json
 import uvicorn
 from app.orchestrator import taxonomy
+from openai import OpenAI
 
 # from .models import DiagnosticsRequest, DiagnosticsResponse
 # from .orchestrator import Orchestrator
@@ -76,7 +77,47 @@ async def getAnalytics(request: AnalyticsRequest):
     # query and propertyID
     # return run_ga4_queries(request.propertyId,"Fetch daily page views, total users, and sessions for the /pricing page over the last 14 days.', 'inputs': {'metrics': 'pageViews, totalUsers, sessions', 'dimensions': 'date', 'date_range': 'last 14 days', 'filters': 'pagePath=/pricing', 'order_by': 'date asc', 'property_id': '123456789'}")
     # return taxonomy
-    return run_graph("What are the top 10 pages by views in the last 14 days, and what are their corresponding title tags?")
+
+    async def llm_detect_json_requirement(query: str) -> bool:
+        """
+        Calls LLM to check if the user is demanding JSON output. LLM must respond:
+        {
+        "isJson": "True" or "False"
+        }
+        """
+        client = OpenAI(
+            api_key= settings.LITELLM_KEY,
+            base_url=settings.LITELLM_PROXY_URL
+        )
+        prompt = f"""
+                Given the following user query, is the user explicitly asking for the answer/output/result to be in JSON format? 
+                Respond ONLY in JSON with this format:
+                {{
+                "isJson": "True" or "False"
+                }}
+                User Query:
+                \"\"\"{query}\"\"\"
+                """
+        
+        response = client.chat.completions.create(
+            model="gemini-2.5-pro",
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user"} # Convert dict to str if needed
+            ]
+        )
+
+        # Clean potential markdown wrapping
+        raw = response.choices[0].message.content.strip()
+        try:
+            result = json.loads(raw)
+            return result.get("isJson", "False") == "True"
+        except Exception:
+            return False
+        
+    shouldBeJson = llm_detect_json_requirement(request.query)
+    return run_graph(request.query,request.propertyId,shouldBeJson)
+
 
 
 

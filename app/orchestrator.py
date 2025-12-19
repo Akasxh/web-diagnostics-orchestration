@@ -219,128 +219,187 @@ def generate_plan(query: str, property_id: str = None, model: str = "gemini-2.5-
 
 # app/orchestrator.py (Only the answer_agent function needs changing)
 
-def answer_agent(task_results, plan: dict, model: str = "gemini-2.5-pro") -> str:
+
+# def answer_agent(task_results, input_query, plan: dict, model: str = "gemini-2.5-pro") -> str:
+#     """
+#     Final Answer Agent: Aggregates task results, applies fusion/explanation, formats per plan.
+#     """
+#     print(f"Using model: {model} for answer aggregation")
+#     if not task_results:
+#         return "No results to aggregate."
+
+#     # --- FIX 1: Handle Input Format (List vs Dict) ---
+#     # If coming from LangGraph, task_results is likely {1: data, 2: data}
+#     # If coming from Mock, it might be [{'task_id': 1, 'data': ...}]
+    
+#     merged_results = {}
+    
+#     if isinstance(task_results, dict):
+#         merged_results = task_results
+#     elif isinstance(task_results, list):
+#         # Handle the list format if it still occurs
+#         try:
+#             merged_results = {r['task_id']: r['data'] for r in task_results}
+#         except TypeError:
+#             # Fallback if list contains just values
+#             merged_results = {i: val for i, val in enumerate(task_results)}
+#     else:
+#         merged_results = {0: str(task_results)}
+
+#     print(f"Debug: Merging {len(merged_results)} results")
+
+#     fusion_prompt = f"""
+# Aggregate these results: {json.dumps(merged_results, default=str)}
+# Use this prompt: {plan['aggregation_prompt']}
+# Output the fused data only—no intro text.
+# """
+#     # ... rest of the function remains the same ...
+#     max_retries = 3
+#     base_delay = 1
+#     fused_data = ""
+    
+#     for attempt in range(max_retries):
+#         try:
+#             response = client.chat.completions.create(
+#                 model=model,
+#                 messages=[{"role": "user", "content": fusion_prompt}]
+#             )
+#             fused_data = response.choices[0].message.content.strip()
+#             break
+#         except APIError as e:
+#             if e.status_code == 429:
+#                 wait_time = base_delay * (2 ** attempt)
+#                 print(f"Rate limited in answer agent. Retrying in {wait_time}s...")
+#                 time.sleep(wait_time)
+#             else:
+#                 raise e
+#     else:
+#         fused_data = str(merged_results)
+
+#     if plan['output_format'] == 'json':
+#         try:
+#             if not fused_data.startswith('{') and not fused_data.startswith('['):
+#                 fused_data = json.dumps({'aggregated_results': fused_data})
+#             final_response = json.dumps(json.loads(fused_data), indent=2)
+#         except (json.JSONDecodeError, ValueError):
+#             final_response = json.dumps({'error': 'Failed to format as JSON', 'raw': fused_data})
+#     else:
+#         final_response = f"Final Answer: {fused_data}"
+
+#     return final_response
+
+
+import re
+import json
+import time
+from openai import APIError
+
+def strip_markdown(text: str) -> str:
     """
-    Final Answer Agent: Aggregates task results, applies fusion/explanation, formats per plan.
+    Removes Markdown formatting (bold, italics, code blocks, headers) 
+    to return clean, human-readable plain text.
+    """
+    # Remove bold/italic markers (**text** or *text* or __text__)
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # Remove **bold**
+    text = re.sub(r'__(.*?)__', r'\1', text)      # Remove __bold__
+    text = re.sub(r'\*(?![ ])(.*?)\*', r'\1', text) # Remove *italic* (but not bullets)
+    
+    # Remove code blocks and inline code
+    text = re.sub(r'```.*?```', '', text, flags=re.DOTALL) # Remove multiline code blocks
+    text = re.sub(r'`(.*?)`', r'\1', text)        # Remove inline `code`
+    
+    # Remove headers (e.g. "## Title" -> "Title")
+    text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
+    
+    # Fix lists: Ensure standard bullets become simple dashes or numbers
+    text = re.sub(r'^\s*\*\s+', '- ', text, flags=re.MULTILINE)
+    
+    return text.strip()
+
+def answer_agent(task_results, input_query, isJson ,plan: dict, model: str = "gemini-2.5-pro") -> str:
+    """
+    Final Answer Agent: 
+    1. Aggregates results into valid JSON (if requested) OR clean plain text.
+    2. Strips all markdown formatting for natural language outputs.
     """
     print(f"Using model: {model} for answer aggregation")
+    
+    # --- 1. Normalize Inputs ---
     if not task_results:
         return "No results to aggregate."
 
-    # --- FIX 1: Handle Input Format (List vs Dict) ---
-    # If coming from LangGraph, task_results is likely {1: data, 2: data}
-    # If coming from Mock, it might be [{'task_id': 1, 'data': ...}]
-    
     merged_results = {}
-    
     if isinstance(task_results, dict):
         merged_results = task_results
     elif isinstance(task_results, list):
-        # Handle the list format if it still occurs
         try:
             merged_results = {r['task_id']: r['data'] for r in task_results}
         except TypeError:
-            # Fallback if list contains just values
             merged_results = {i: val for i, val in enumerate(task_results)}
     else:
         merged_results = {0: str(task_results)}
 
-    print(f"Debug: Merging {len(merged_results)} results")
 
-    fusion_prompt = f"""
-Aggregate these results: {json.dumps(merged_results, default=str)}
-Use this prompt: {plan['aggregation_prompt']}
-Output the fused data only—no intro text.
-"""
-    # ... rest of the function remains the same ...
+    if isJson:
+        # === JSON PATH ===
+        print("Debug: JSON format requested. Running strict formatter...")
+        
+        json_prompt = f"""
+        You are a JSON formatter. 
+        User Query: "{input_query}"
+        Data: {json.dumps(merged_results, default=str)}
+        
+        Task: Convert the data into a valid JSON object that answers the query.
+        Rules: Output ONLY raw JSON. No markdown formatting. No code blocks.
+        """
+        raw_output = _call_llm_with_retry(json_prompt, model)
+        
+        # Clean potential markdown if LLM adds it anyway
+        cleaned_json = raw_output.replace("```json", "").replace("```", "").strip()
+        try:
+            return json.loads(cleaned_json)
+        except :
+            return cleaned_json
+
+    else:
+        # === HUMAN READABLE PATH ===
+        print("Debug: Natural language requested. Generating clean text...")
+        
+        nl_prompt = f"""
+        You are a helpful assistant.
+        User Query: "{input_query}"
+        Data: {json.dumps(merged_results, default=str)}
+        
+        Instructions:
+        1. Answer the query clearly using the data.
+        2. STRICTLY PLAIN TEXT ONLY. 
+        3. DO NOT use Markdown bolding (**), italics (*), or headers (#).
+        4. Use simple indentation or dashes (-) for lists.
+        5. Write exactly as a human would type in a plain text email.
+        """
+        
+        raw_output = _call_llm_with_retry(nl_prompt, model)
+        
+        # Double-check safety: Strip markdown just in case
+        clean_output = strip_markdown(raw_output)
+        
+        return f"{clean_output}"
+
+def _call_llm_with_retry(prompt: str, model: str) -> str:
+    """Helper for LLM calls with retry logic."""
     max_retries = 3
     base_delay = 1
-    fused_data = ""
     
     for attempt in range(max_retries):
         try:
             response = client.chat.completions.create(
                 model=model,
-                messages=[{"role": "user", "content": fusion_prompt}]
+                messages=[{"role": "user", "content": prompt}]
             )
-            fused_data = response.choices[0].message.content.strip()
-            break
+            return response.choices[0].message.content.strip()
         except APIError as e:
             if e.status_code == 429:
-                wait_time = base_delay * (2 ** attempt)
-                print(f"Rate limited in answer agent. Retrying in {wait_time}s...")
-                time.sleep(wait_time)
+                time.sleep(base_delay * (2 ** attempt))
             else:
                 raise e
-    else:
-        fused_data = str(merged_results)
-
-    if plan['output_format'] == 'json':
-        try:
-            if not fused_data.startswith('{') and not fused_data.startswith('['):
-                fused_data = json.dumps({'aggregated_results': fused_data})
-            final_response = json.dumps(json.loads(fused_data), indent=2)
-        except (json.JSONDecodeError, ValueError):
-            final_response = json.dumps({'error': 'Failed to format as JSON', 'raw': fused_data})
-    else:
-        final_response = f"Final Answer: {fused_data}"
-
-    return final_response
-# --- Execution Simulation ---
-
-def mock_execution_layer(plan: dict) -> list[dict]:
-    """
-    Simulates the execution of GA4 and SEO tools by returning the hardcoded mock data
-    provided in the source ipynb. This allows the pipeline to run end-to-end.
-    """
-    print("Debug: Executing tasks (MOCK MODE)...")
-    
-    # These are the exact hardcoded values from your 'mock_results' variable
-    mock_results = [
-        {'task_id': 1, 'data': {'pages': ['/home', '/pricing'], 'views': [1000, 800]}},  # From GA4
-        {'task_id': 2, 'data': {'titles': {'/home': 'Home Page', '/pricing': 'Pricing Plan'}}},  # From SEO
-        # task_id 3 is usually the 'answer' agent, which doesn't produce data for itself
-    ]
-    
-    # We filter results to only return data for tasks that exist in the plan (excluding the final answer task)
-    relevant_ids = [t['id'] for t in plan['tasks'] if t['agent'] != 'answer']
-    
-    # Simple logic: just return the mock data for the first N tasks required
-    # In a real scenario, this would loop through plan['tasks'] and call actual tools
-    execution_outputs = []
-    for i, t_id in enumerate(relevant_ids):
-        if i < len(mock_results):
-            execution_outputs.append(mock_results[i])
-            
-    return execution_outputs
-
-# --- Main Entry Point ---
-
-def run_agent_pipeline(query: str, property_id: str = None):
-    """
-    The main function that takes the user query, orchestrates the plan,
-    executes (mocks) the tools, and generates the final output.
-    """
-    print(f"\n--- Starting Pipeline for Query: {query} ---")
-    
-    # 1. Generate Plan (Classify -> Decompose -> Structure)
-    plan = generate_plan(query, property_id)
-    
-    # 2. Execute Tasks (using Mock Layer to provide the hardcoded data)
-    task_results = mock_execution_layer(plan)
-    
-    # 3. Aggregate and Answer
-    final_output = answer_agent(task_results, plan)
-    
-    return final_output
-
-# --- Usage Example ---
-
-if __name__ == "__main__":
-    # Example usage with the specific test case from your notebook
-    test_query = "What are the top 10 pages by views in the last 14 days, and what are their corresponding title tags?"
-    test_property_id = "123456789"
-    
-    result = run_agent_pipeline(test_query, test_property_id)
-    print("\nFINAL OUTPUT:")
-    print(result)
+    return "Error: LLM failed to respond."

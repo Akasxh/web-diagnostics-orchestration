@@ -11,7 +11,7 @@ from typing import Dict, Any, TypedDict, List
 
 from langgraph.graph import StateGraph, END
 
-from app.orchestrator import generate_plan, answer_agent, mock_execution_layer
+from app.orchestrator import generate_plan, answer_agent
 from app.config import get_settings
 
 settings = get_settings()
@@ -24,6 +24,7 @@ class OrchestrationState(TypedDict):
     plans: Dict[str, Any]  # Full plan from planner
     task_results: List[Dict[str, Any]]
     response: str
+    isJson : bool
 
 def if_seo_only(state: OrchestrationState) -> bool:
     """
@@ -174,7 +175,7 @@ def task_executor(state: OrchestrationState) -> OrchestrationState:
 
     # ---- Final Answer ---- #
     # Pass the populated task_results dict to the answer agent
-    response = answer_agent(task_results, plans)
+    response = answer_agent(task_results,state["query"], state["isJson"] ,plans)
 
     return {
         **state,
@@ -207,7 +208,7 @@ def build_orchestration_graph():
     return workflow.compile()
 
 
-def run_graph(query: str, property_id: str = None) -> str:
+def run_graph(query: str, property_id: str = None, isJson : bool = False) -> str:
     """
     Convenience function to run the orchestration graph with a query.
     
@@ -224,7 +225,8 @@ def run_graph(query: str, property_id: str = None) -> str:
         "property_id": property_id or settings.GA4_PROPERTY_ID or "123456789",
         "plans": {},
         "task_results": [],
-        "response": ""
+        "response": "",
+        "isJson" : isJson
     }
     result = graph.invoke(initial_state)
     return result['response']
