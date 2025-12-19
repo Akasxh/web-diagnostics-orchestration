@@ -217,7 +217,9 @@ def generate_plan(query: str, property_id: str = None, model: str = "gemini-2.5-
 
 
 
-def answer_agent(task_results: list[dict], plan: dict, model: str = "gemini-2.5-pro") -> str:
+# app/orchestrator.py (Only the answer_agent function needs changing)
+
+def answer_agent(task_results, plan: dict, model: str = "gemini-2.5-pro") -> str:
     """
     Final Answer Agent: Aggregates task results, applies fusion/explanation, formats per plan.
     """
@@ -225,14 +227,32 @@ def answer_agent(task_results: list[dict], plan: dict, model: str = "gemini-2.5-
     if not task_results:
         return "No results to aggregate."
 
-    merged_results = {result['task_id']: result['data'] for result in task_results}
+    # --- FIX 1: Handle Input Format (List vs Dict) ---
+    # If coming from LangGraph, task_results is likely {1: data, 2: data}
+    # If coming from Mock, it might be [{'task_id': 1, 'data': ...}]
+    
+    merged_results = {}
+    
+    if isinstance(task_results, dict):
+        merged_results = task_results
+    elif isinstance(task_results, list):
+        # Handle the list format if it still occurs
+        try:
+            merged_results = {r['task_id']: r['data'] for r in task_results}
+        except TypeError:
+            # Fallback if list contains just values
+            merged_results = {i: val for i, val in enumerate(task_results)}
+    else:
+        merged_results = {0: str(task_results)}
+
     print(f"Debug: Merging {len(merged_results)} results")
 
     fusion_prompt = f"""
-Aggregate these results: {merged_results}
+Aggregate these results: {json.dumps(merged_results, default=str)}
 Use this prompt: {plan['aggregation_prompt']}
 Output the fused data only—no intro text.
 """
+    # ... rest of the function remains the same ...
     max_retries = 3
     base_delay = 1
     fused_data = ""
@@ -266,7 +286,6 @@ Output the fused data only—no intro text.
         final_response = f"Final Answer: {fused_data}"
 
     return final_response
-
 # --- Execution Simulation ---
 
 def mock_execution_layer(plan: dict) -> list[dict]:

@@ -205,6 +205,7 @@ def run_ga4_queries(property_id, user_query):
         clean_data.append(item)
 
     # 4. Return the standard Python list
+    print(clean_data)
     return {
         "status": "success",
         "data": clean_data

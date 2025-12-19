@@ -64,114 +64,123 @@ def orchestrator_node(state: OrchestrationState) -> OrchestrationState:
 
 
 import copy
+import json
+# agent.py
 
-def execute_task(task , agent):
-    # seo or ga4
-    print(task)
-    print(agent)
+# ... imports ...
+
+def execute_task(task, agent):
+    """
+    Executes a single task. 
+    Crucially, implies context into the prompt description so the specific
+    Service LLM (GA4 parser or SEO Python generator) knows about previous data.
+    """
+    print(f"--- Running Agent: {agent} ---")
+    
+    # --- FIX 2: Prepare the Prompt with Context ---
+    description = task.get('desc', '')
+    inputs = task.get('inputs', {})
+    
+    # If there is context (results from previous tasks), append it to the query
+    # so the downstream LLM knows what to calculate percentages OF.
+    if 'context' in inputs and inputs['context']:
+        context_str = json.dumps(inputs['context'], default=str)
+        # We append this to the description so the service LLM sees it
+        description += f"\n\nCONTEXT_DATA_FROM_PREVIOUS_STEPS:\n{context_str}\n\nINSTRUCTION: Use the context data above if required to answer: {task['desc']}"
+
     response = None
-    if agent == 'seo':
-        from app.services.seo_gsheet_service import execute_workbook_query
-        response = execute_workbook_query(task['desc'])
-    elif agent == 'ga4':
-        from app.services.ga4_service import run_ga4_queries
-        response = run_ga4_queries(task['inputs']['property_id'], task['desc'])
+    try:
+        if agent == 'seo':
+            from app.services.seo_gsheet_service import execute_workbook_query
+            # Pass the description + context string
+            response = execute_workbook_query(description)
+        elif agent == 'ga4':
+            from app.services.ga4_service import run_ga4_queries
+            # Pass the description + context string
+            response = run_ga4_queries(inputs.get('property_id'), description)
+    except Exception as e:
+        response = f"Error executing task: {str(e)}"
+        
     return response
 
 def task_executor(state: OrchestrationState) -> OrchestrationState:
     """
     Node 3: Execute tasks based on the plan and generate final response.
-    Implements a DAG solver to handle dependencies and pass data between tasks.
     """
     plans = state.get("plans")
 
-    # Guard: invalid or missing plan
     if not plans or plans.get("type") == "invalid":
         return state
 
     tasks = plans.get("tasks", [])
-    # Ensure dependencies keys are integers if your IDs are integers
-    # The JSON schema might return strings like "2", so we normalize.
     raw_deps = plans.get("dependencies", {})
     dependencies = {int(k): [int(v) for v in vals] for k, vals in raw_deps.items()}
-
-    # Map tasks by ID for easy lookup
-    task_map = {t["id"]: t for t in tasks}
     
     # Store results: { task_id: output }
     task_results = {}
     completed_ids = set()
 
-    # ---- Execution Loop (DAG Solver) ---- #
-    # This loop works for sequential, parallel (independent), and mixed flows.
+    # ---- Execution Loop ---- #
     while len(completed_ids) < len(tasks):
-        progress = False
-        
-        # Identify tasks that are ready to run
-        # Ready = Not yet completed AND all dependencies are completed
+        # ... (logic to find ready_tasks is fine) ...
         ready_tasks = []
         for task in tasks:
             tid = task["id"]
-            if tid in completed_ids:
-                continue
+            if tid in completed_ids: continue
             
-            # Check if all dependencies for this task are in completed_ids
             task_deps = dependencies.get(tid, [])
             if all(dep_id in completed_ids for dep_id in task_deps):
                 ready_tasks.append(task)
 
-        # Execution Phase
         if not ready_tasks:
-            # If tasks remain but none are ready, we have a cyclic dependency or missing ID
-            remaining = [t["id"] for t in tasks if t["id"] not in completed_ids]
-            raise RuntimeError(f"Deadlock detected! Remaining tasks {remaining} have unresolved dependencies.")
+            # Handle tasks that are the 'answer' agent separately if using that pattern,
+            # or raise error if deadlock.
+            # In your plan, the last task is 'answer', which we skip here and handle at the end.
+            remaining = [t for t in tasks if t["id"] not in completed_ids]
+            if all(t['agent'] == 'answer' for t in remaining):
+                break # Exit loop, we are done with tools
+            raise RuntimeError(f"Deadlock detected! Remaining: {[t['id'] for t in remaining]}")
 
         for task in ready_tasks:
             tid = task["id"]
             
-            # --- CRITICAL FIX: Context Injection ---
-            # Create a copy of inputs to avoid mutating the original plan
-            # and inject outputs from dependency tasks.
+            # Skip the final answer task in the execution loop
+            if task['agent'] == 'answer':
+                completed_ids.add(tid)
+                continue
+
+            # Context Injection Logic
             current_inputs = copy.deepcopy(task.get("inputs", {}))
-            
             task_deps = dependencies.get(tid, [])
+            
             if task_deps:
-                # Collect results from all parent tasks
                 parent_outputs = {
-                    f"task_{dep_id}_output": task_results[dep_id] 
+                    f"task_{dep_id}_output": task_results.get(dep_id) 
                     for dep_id in task_deps
                 }
-                # Merge parent outputs into current inputs
-                # The agent receiving this must know to look for these keys or 'context'
                 current_inputs["context"] = parent_outputs
-                
-                # OPTIONAL: If you want to merge directly into the root of inputs
-                # current_inputs.update(parent_outputs)
 
-            # Update task inputs temporarily for execution
             execution_payload = {**task, "inputs": current_inputs}
             
-            # Execute
-            # Pass the modified payload (with injected data) to your executor
-            print(f"Executing Task {tid}: {task['desc']}") # Logging
-            print(tasks)
-            result = execute_task(execution_payload,tasks[1])
+            print(f"Executing Task {tid}: {task['desc']}")
             
-            # Store result and mark complete
+            # --- FIX 3: Dynamic Agent Selection ---
+            # ERROR WAS: result = execute_task(execution_payload, tasks[1])
+            # FIX IS: Use the agent defined in the specific task
+            result = execute_task(execution_payload, task['agent'])
+            
             task_results[tid] = result
             completed_ids.add(tid)
-            progress = True
 
     # ---- Final Answer ---- #
-    # Pass the full context to the answer agent to format the NL response
+    # Pass the populated task_results dict to the answer agent
     response = answer_agent(task_results, plans)
 
     return {
         **state,
-        "task_results": task_results,
+        "task_results": task_results, # This is a Dict {1:..., 2:...}
         "response": response
     }
-
 
 # Build Graph
 def build_orchestration_graph():
