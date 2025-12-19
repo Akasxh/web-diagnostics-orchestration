@@ -286,16 +286,28 @@ def answer_agent(task_results, input_query, isJson ,plan: dict, model: str = "ge
         print("Debug: Natural language requested. Generating clean text...")
         
         nl_prompt = f"""
-        You are a helpful assistant.
-        User Query: "{input_query}"
-        Data: {json.dumps(merged_results, default=str)}
-        
-        Instructions:
-        1. Answer the query clearly using the data.
-        2. STRICTLY PLAIN TEXT ONLY. 
-        3. DO NOT use Markdown bolding (**), italics (*), or headers (#).
-        4. Use simple indentation or dashes (-) for lists.
-        5. Write exactly as a human would type in a plain text email.
+        ### ROLE
+        You are a strict data reporting engine. You function as a direct interface to the provided database results.
+
+        ### DATA CONTEXT
+        {json.dumps(merged_results, default=str)}
+
+        ### USER QUERY
+        "{input_query}"
+
+        ### INSTRUCTIONS
+        1. SYNTHESIS: Answer the user query based ONLY on the provided DATA CONTEXT.
+        2. FORMATTING: Output STRICTLY PLAIN TEXT. 
+        - NO Markdown (no bolding **, no italics *, no headers #).
+        - Use standard dashes (-) for lists.
+        - Use whitespace for separation.
+        3. TONE & STYLE: 
+        - Be direct, objective, and concise.
+        - NO conversational filler (e.g., "Here is the data," "I hope this helps," "Let me know if...").
+        - NO greetings or sign-offs. 
+        - If the answer is not in the data, state "Data not found" and stop.
+
+        ### OUTPUT
         """
         
         raw_output = _call_llm_with_retry(nl_prompt, model)
